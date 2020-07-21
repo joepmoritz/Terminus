@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import sublime
 
 import os
@@ -306,7 +307,7 @@ class Terminal:
         if not self.detached:
             value = value if value else self.config_name
             self._title = value
-            self.view.set_name(value)
+            self.view.set_name(u'💻 ' + value)
 
     def clear_callback(self):
         self._pending_to_clear_scrollback[0] = True
