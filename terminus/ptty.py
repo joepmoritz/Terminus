@@ -22,6 +22,7 @@ else:
 
 
 logger = logging.getLogger('Terminus')
+logger.setLevel(logging.DEBUG)
 
 
 FG_AIXTERM = {
@@ -267,6 +268,8 @@ class TerminalScreen(pyte.Screen):
         """
         data = data.translate(
             self.g1_charset if self.charset else self.g0_charset)
+
+        logger.debug("data: {}".format(data))
 
         for char in data:
             char_width = wcwidth(char)
