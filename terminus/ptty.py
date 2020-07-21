@@ -590,6 +590,25 @@ class TerminalScreen(pyte.Screen):
             count = self.first_non_empty_line_from_bottom() + 1
         self.history.extend(copy(self.buffer[y]) for y in range(count))
 
+    def clear_auto_complete(self):
+        self.auto_complete_items = []
+
+    def add_auto_complete_string(self, text):
+        # logger.debug("add_auto_complete_string: {}".format(text))
+
+        is_whitespace = re.match(r'^\s*$', text)
+        if is_whitespace:
+            return
+
+        if text in '/@*' and len(self.auto_complete_items) >= 1:
+            self.auto_complete_items[-1] += text
+            return
+
+        text = re.sub(r'\s*--.*', '', text)
+
+        self.auto_complete_items.append(text)
+
+
 
 PLAIN_TEXT = "plain_text"
 OSC_PARAM = "osc_param"
@@ -609,6 +628,7 @@ class TerminalStream(pyte.Stream):
         self._osc_termination_pattern = re.compile(
             "|".join(map(re.escape, [ctrl.ST_C0, ctrl.ST_C1, ctrl.BEL, ctrl.CR])))
         self.yield_what = None
+        self.remove_ac = False
         super().__init__(*args, **kwargs)
 
     def _parser_fsm(self):
@@ -665,7 +685,10 @@ class TerminalStream(pyte.Stream):
                     char = OSC_C1  # Go to OSC.
                 else:
                     if char == "#":
-                        sharp_dispatch[(yield)]()
+                        if not self.remove_ac:
+                            sharp_dispatch[(yield)]()
+                        else:
+                            yield
                     if char == "%":
                         self.select_other_charset((yield))
                     elif char in "()":
@@ -677,7 +700,8 @@ class TerminalStream(pyte.Stream):
                         # for the why on the UTF-8 restriction.
                         listener.define_charset(code, mode=char)
                     else:
-                        escape_dispatch[char]()
+                        if not self.remove_ac:
+                            escape_dispatch[char]()
                     continue    # Don't go to CSI.
 
             if char in basic:
@@ -687,7 +711,8 @@ class TerminalStream(pyte.Stream):
                 if (char == ctrl.SI or char == ctrl.SO) and self.use_utf8:
                     continue
 
-                basic_dispatch[char]()
+                if not self.remove_ac:
+                    basic_dispatch[char]()
             elif char == CSI_C1:
                 # All parameters are unsigned, positive decimal integers, with
                 # the most significant digit sent first. Any parameter greater
@@ -710,7 +735,8 @@ class TerminalStream(pyte.Stream):
                     if char == "?":
                         private = True
                     elif char in ALLOWED_IN_CSI:
-                        basic_dispatch[char]()
+                        if not self.remove_ac:
+                            basic_dispatch[char]()
                     elif char in SP_OR_GT:
                         pass  # Secondary DA is not supported atm.
                     elif char in CAN_OR_SUB:
@@ -728,10 +754,11 @@ class TerminalStream(pyte.Stream):
                         if char == ";":
                             current = ""
                         else:
-                            if private:
-                                csi_dispatch[char](*params, private=True)
-                            else:
-                                csi_dispatch[char](*params)
+                            if not self.remove_ac:
+                                if private:
+                                    csi_dispatch[char](*params, private=True)
+                                else:
+                                    csi_dispatch[char](*params)
                             break  # CSI is finished.
             elif char == OSC_C1:
                 code = ""
@@ -754,7 +781,8 @@ class TerminalStream(pyte.Stream):
                             break
                         param += block
 
-                osc_dispatch[code](param)
+                if not self.remove_ac:
+                    osc_dispatch[code](param)
 
             elif char not in NUL_OR_DEL:
                 draw(char)
@@ -769,11 +797,38 @@ class TerminalStream(pyte.Stream):
         length = len(data)
         offset = 0
         while offset < length:
+            if not self.remove_ac and data[offset:].startswith('@~@'):
+                self.remove_ac = True
+                self.listener.clear_auto_complete()
+                offset = offset + 3
+                logger.debug("turned on at offset: {}".format(offset))
+
+            if self.remove_ac and data[offset:].startswith('@~E@'):
+                self.remove_ac = False
+                logger.debug("turned off from {} near: {}".format(offset, data[offset:]))
+                offset = data.find('A', offset + 7) + 1
+                logger.debug("turned off at offset: {}".format(offset))
+                self.listener.cursor_up(1)
+
             if yield_what == PLAIN_TEXT:
                 match = match_text(data, offset)
                 if match:
                     start, offset = match.span()
-                    draw(data[start:offset])
+
+                    if self.remove_ac:
+                        end_index = data.find('@~E@', start, offset)
+                        if end_index >= 0:
+                            self.listener.add_auto_complete_string(data[start:end_index])
+                            start = data.find('A', end_index + 7) + 1
+                            self.remove_ac = False
+                        else:
+                            self.listener.add_auto_complete_string(data[start:offset])
+                            start = offset
+
+                    if offset > start:
+                        draw(data[start:offset])
+                    else:
+                        yield_what = None
                 else:
                     yield_what = None
             elif yield_what == OSC_PARAM:

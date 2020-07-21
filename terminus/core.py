@@ -1127,6 +1127,9 @@ class TerminusRenderCommand(sublime_plugin.TextCommand, TerminusViewMixin):
 
         screen = terminal.screen
 
+        if hasattr(screen, 'auto_complete_items'):
+            view.settings().set('auto_complete_items', screen.auto_complete_items)
+
         if terminal._pending_to_clear_scrollback[0]:
             view.replace(edit, sublime.Region(0, view.size()), "")  # nuke everything
             terminal.offset = 0
