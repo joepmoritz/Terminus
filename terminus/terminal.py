@@ -205,7 +205,8 @@ class Terminal:
         self.timeit = timeit
         if timeit:
             self.start_time = time.time()
-        self.default_title = view.name() if view.name() else title
+        if title and not self.default_title:
+            self.default_title = title
 
         if view:
             self.title = title
@@ -299,6 +300,14 @@ class Terminal:
             pass
 
     @property
+    def default_title(self):
+        return self.view.settings().get('default_title')
+
+    @default_title.setter
+    def default_title(self, value):
+        self.view.settings().set('default_title', value)
+
+    @property
     def title(self):
         return self._title
 
@@ -307,7 +316,8 @@ class Terminal:
         if not self.detached:
             value = value if value else self.config_name
             self._title = value
-            self.view.set_name(u'💻 ' + value)
+            # self.view.set_name(u'💻 ' + value)
+            self.view.set_name(u'[] ' + value)
 
     def clear_callback(self):
         self._pending_to_clear_scrollback[0] = True
